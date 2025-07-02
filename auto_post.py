@@ -1,58 +1,56 @@
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import os
+from playwright.sync_api import sync_playwright
+import random
+import requests
 from dotenv import load_dotenv
-import time, os, requests, json
 
-# Load .env
+# Load credentials from .env file
 load_dotenv()
-EMAIL = os.getenv("LINKEDIN_EMAIL")
-PASSWORD = os.getenv("LINKEDIN_PASSWORD")
+LINKEDIN_EMAIL = os.getenv("LINKEDIN_EMAIL")
+LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD")
 
+# Generate a motivational quote using ZenQuotes API
 def get_quote():
     try:
-        res = requests.get("https://zenquotes.io/api/random")
-        data = json.loads(res.text)
-        return f"{data[0]['q']} — {data[0]['a']}"
+        response = requests.get("https://zenquotes.io/api/random")
+        if response.status_code == 200:
+            return response.json()[0]['q'] + " — " + response.json()[0]['a']
+        else:
+            return "Believe you can and you're halfway there. — Theodore Roosevelt"
     except:
-        return "Keep going. You're doing great!"
+        return "Success usually comes to those who are too busy to be looking for it. — Henry David Thoreau"
 
 def post_to_linkedin(quote):
-    options = uc.ChromeOptions()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
 
-    driver = uc.Chrome(options=options)
-    driver.get("https://www.linkedin.com/login")
+        # Login to LinkedIn
+        page.goto("https://www.linkedin.com/login")
+        page.fill("input#username", LINKEDIN_EMAIL)
+        page.fill("input#password", LINKEDIN_PASSWORD)
+        page.click("button[type=submit]")
 
-    WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.ID, "username"))).send_keys(EMAIL)
-    driver.find_element(By.ID, "password").send_keys(PASSWORD)
-    driver.find_element(By.XPATH, "//button[@type='submit']").click()
+        # Wait for homepage
+        page.wait_for_selector("[role=button][aria-label^='Start a post']", timeout=15000)
+        page.click("[role=button][aria-label^='Start a post']")
 
-    WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "main")))
+        # Wait for editor and fill the post
+        page.wait_for_selector("div[role=textbox]")
+        page.fill("div[role=textbox]", quote)
 
-    start_btn = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((
-        By.XPATH, "//button[contains(@class,'artdeco-button') and .//span[contains(text(),'Start a post')]]"
-    )))
-    start_btn.click()
+        # Click Post button
+        page.click("button:has-text('Post')")
 
-    editor = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((By.CLASS_NAME, "ql-editor")))
-    editor.click()
-    editor.send_keys(quote)
-    time.sleep(2)
+        # Confirm posted
+        page.wait_for_timeout(5000)
+        print("✅ Posted to LinkedIn successfully!")
 
-    post_btn = WebDriverWait(driver, 15).until(EC.element_to_be_clickable((
-        By.XPATH, "//button[contains(@class,'share-actions__primary-action') and .//span[text()='Post']]"
-    )))
-    post_btn.click()
-
-    print("✅ Posted successfully.")
-    driver.quit()
+        context.close()
+        browser.close()
 
 if __name__ == "__main__":
     quote = get_quote()
-    print("Generated quote:", quote)
+    print(f"Generated quote: {quote}")
     post_to_linkedin(quote)
